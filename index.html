@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AR Pizza 3D - Belajar Pecahan</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background: #000;
+            touch-action: none;
+        }
+        
+        #video-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+        
+        #camera-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #ar-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        #ar-canvas.visible {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+        
+        #ui-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 3;
+            pointer-events: none;
+        }
+        
+        #header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(118, 75, 162, 0.95);
+            padding: 12px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            pointer-events: auto;
+        }
+        
+        #header h1 {
+            color: white;
+            font-size: 20px;
+            margin-bottom: 3px;
+        }
+        
+        #header p {
+            color: rgba(255,255,255,0.9);
+            font-size: 12px;
+        }
+        
+        #question-panel {
+            position: absolute;
+            top: 80px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            max-width: 280px;
+            pointer-events: auto;
+        }
+        
+        #question-panel h2 {
+            color: #764ba2;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+        
+        #question-text {
+            color: #333;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        #fraction-display {
+            position: absolute;
+            top: 80px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            text-align: center;
+            min-width: 100px;
+            pointer-events: auto;
+        }
+        
+        #fraction-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #764ba2;
+            margin-bottom: 5px;
+        }
+        
+        #fraction-label {
+            font-size: 11px;
+            color: #666;
+        }
+        
+        #rotation-controls {
+            position: absolute;
+            bottom: clamp(60px, 10vh, 120px);
+            right: 16px;
+            left: auto;
+            transform: none;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(48px, 56px));
+            grid-auto-rows: minmax(48px, 56px);
+            gap: 8px;
+            pointer-events: auto;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            z-index: 40;
+        }
+        
+        .rotate-btn {
+            background: rgba(255, 255, 255, 0.95);
+            border: 2px solid #764ba2;
+            border-radius: 14px;
+            cursor: pointer;
+            font-size: clamp(18px, 2.5vw, 26px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.18s, background 0.18s, opacity 0.18s;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            user-select: none;
+            padding: 12px;
+            min-width: 48px;
+            min-height: 48px;
+            touch-action: manipulation;
+        }
+        
+        .rotate-btn:active {
+            transform: scale(0.95);
+            background: rgba(118, 75, 162, 0.95);
+        }
+        
+        .rotate-btn:nth-child(1) { grid-column: 1; grid-row: 1; }
+        .rotate-btn:nth-child(2) { grid-column: 2; grid-row: 1; }
+        .rotate-btn:nth-child(3) { grid-column: 1; grid-row: 2; }
+        .rotate-btn:nth-child(4) { grid-column: 2; grid-row: 2; }
+
+        /* Disabled state for rotation controls */
+        #rotation-controls.disabled {
+            opacity: 0.45;
+            pointer-events: none;
+            transform: none;
+        }
+        .rotate-btn.disabled, .rotate-btn[disabled] {
+            opacity: 0.6;
+            filter: grayscale(40%);
+            pointer-events: none;
+        }
+        /* Disabled state for controls bar */
+        #controls[aria-disabled="true"] {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        
+        @media (max-width: 600px) {
+            #rotation-controls {
+                bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
+                gap: 10px;
+            }
+            .rotate-btn {
+                border-radius: 12px;
+                font-size: 22px;
+                min-width: 56px;
+                min-height: 56px;
+            }
+            #controls {
+                bottom: 18px;
+                gap: 8px;
+                padding: 0 12px;
+            }
+            #question-panel { max-width: 220px; left: 8px; top: 70px; }
+            #fraction-display { right: 8px; top: 70px; min-width: 80px; }
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+        
+        button {
+            padding: 12px 20px;
+            font-size: 14px;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            pointer-events: auto;
+        }
+        
+        #new-question-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        #check-btn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        #reset-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+        
+        button:active {
+            transform: scale(0.95);
+        }
+        
+        #result-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: rgba(255, 255, 255, 0.98);
+            padding: 25px 40px;
+            border-radius: 20px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            transition: transform 0.3s;
+            pointer-events: auto;
+            white-space: pre-line;
+        }
+        
+        #result-message.show {
+            transform: translate(-50%, -50%) scale(1);
+        }
+        
+        .correct {
+            color: #10b981;
+            border: 3px solid #10b981;
+        }
+        
+        .incorrect {
+            color: #ef4444;
+            border: 3px solid #ef4444;
+        }
+        
+        #start-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        
+        #start-content {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 450px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            margin: 20px;
+        }
+        
+        #start-content h2 {
+            color: #764ba2;
+            font-size: 26px;
+            margin-bottom: 15px;
+        }
+        
+        #qr-marker {
+            margin: 20px 0;
+            padding: 15px;
+            background: white;
+            border: 3px dashed #764ba2;
+            border-radius: 15px;
+        }
+        
+        #qr-marker-img {
+            width: 200px;
+            height: 200px;
+            background: white;
+            border: 2px solid #333;
+        }
+        
+        #instruction-text {
+            color: #666;
+            margin: 15px 0;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        
+        #start-ar-btn {
+            margin-top: 15px;
+            padding: 14px 35px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        #ar-status {
+            position: absolute;
+            top: 65px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Marker popup bubble that follows the detected marker */
+        #marker-popup {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -140%);
+            background: white;
+            padding: 10px 14px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.24);
+            font-size: 13px;
+            color: #2b2b2b;
+            z-index: 12;
+            display: none;
+            opacity: 0;
+            transition: left 0.12s linear, top 0.12s linear, opacity 0.18s ease, transform 0.12s ease;
+            pointer-events: none;
+            min-width: 160px;
+            text-align: center;
+            will-change: transform, left, top, opacity;
+        }
+        #marker-popup .title {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            display: inline-block;
+            font-size: 13px;
+        }
+        #marker-popup .subtitle {
+            font-size: 12px;
+            color: #666;
+            line-height: 1.2;
+            max-width: 220px;
+            display: block;
+        }
+
+        /* Responsive: mobile adjustments */
+        @media (max-width: 600px) {
+            #marker-popup {
+                min-width: 140px;
+                padding: 12px 10px;
+                transform: translate(-50%, -160%);
+            }
+            #marker-popup .title { font-size: 14px; }
+            #marker-popup .subtitle { font-size: 13px; }
+        }
+
+        /* Responsive: larger desktop adjustments */
+        @media (min-width: 1100px) {
+            #marker-popup { min-width: 220px; padding: 12px 16px; }
+            #marker-popup .title { font-size: 15px; }
+            #marker-popup .subtitle { font-size: 13px; }
+        }
+        
+        #download-marker {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 8px 20px;
+            background: #4facfe;
+            color: white;
+            text-decoration: none;
+            border-radius: 20px;
+            font-size: 13px;
+            transition: all 0.3s;
+        }
+        
+        #control-hint {
+            position: absolute;
+            bottom: 210px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 15px;
+            font-size: 12px;
+            pointer-events: none;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="start-screen">
+        <div id="start-content">
+            <h2>🍕 AR Pizza 3D</h2>
+            <p style="color: #666; font-size: 15px;">Belajar Pecahan dengan Augmented Reality</p>
+            
+            <div id="qr-marker">
+                <canvas id="qr-marker-img"></canvas>
+            </div>
+            
+            <div id="instruction-text">
+                <strong>Cara Bermain:</strong><br>
+                1. Download & cetak QR marker<br>
+                2. Klik "Mulai AR" & izinkan kamera<br>
+                3. Arahkan kamera ke marker<br>
+                4. Pizza 3D muncul di atas marker!<br>
+                5. Geser layar atau pakai tombol panah<br>
+                6. Klik pizza untuk pilih potongan
+            </div>
+            
+            <a id="download-marker" href="#" download="pizza-ar-marker.png">📥 Download Marker</a>
+            
+            <button id="start-ar-btn">📷 Mulai AR</button>
+        </div>
+    </div>
+    
+    <div id="video-container" style="display: none;">
+        <video id="camera-video" autoplay playsinline></video>
+    </div>
+    
+    <canvas id="ar-canvas" style="display: none;"></canvas>
+    
+    <div id="ui-overlay" style="display: none;">
+        <div id="header">
+            <h1>🍕 AR Pizza 3D</h1>
+            <p>Geser/gunakan panah untuk putar pizza!</p>
+        </div>
+        
+        <div id="ar-status">🔍 Cari marker QR...</div>
+
+        <div id="marker-popup">
+            <div class="title">Objek</div>
+            <div class="subtitle">Arahkan kamera ke marker untuk melihat objek</div>
+        </div>
+        
+        <div id="question-panel">
+            <h2>📝 Soal</h2>
+            <div id="question-text">Loading...</div>
+        </div>
+        
+        <div id="fraction-display">
+            <div id="fraction-value">0/6</div>
+            <div id="fraction-label">Dipilih</div>
+        </div>
+        
+        <div id="control-hint">
+            👆 Swipe atau gunakan tombol panah<br>untuk putar pizza
+        </div>
+        
+        <div id="rotation-controls" aria-hidden="true">
+            <div class="rotate-btn" role="button" aria-label="Putar atas" data-dir="up">⬆️</div>
+            <div class="rotate-btn" role="button" aria-label="Putar kiri" data-dir="left">⬅️</div>
+            <div class="rotate-btn" role="button" aria-label="Putar kanan" data-dir="right">➡️</div>
+            <div class="rotate-btn" role="button" aria-label="Putar bawah" data-dir="down">⬇️</div>
+        </div>
+        
+        <div id="controls">
+            <button id="new-question-btn">🎲 Soal</button>
+            <button id="check-btn">✓ Cek</button>
+            <button id="reset-btn">↺ Reset</button>
+        </div>
+        
+        <div id="result-message"></div>
+    </div>
+
+    <script>
+        // Generate QR Marker
+        function generateQRMarker() {
+            const canvas = document.getElementById('qr-marker-img');
+            const ctx = canvas.getContext('2d');
+            const size = 200;
+            canvas.width = size;
+            canvas.height = size;
+            
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, size, size);
+            
+            ctx.fillStyle = 'black';
+            const moduleSize = size / 25;
+            
+            for (let y = 0; y < 25; y++) {
+                for (let x = 0; x < 25; x++) {
+                    const shouldFill = (x + y) % 2 === 0 || 
+                                     (x % 3 === 0 && y % 3 === 0) ||
+                                     (x === y) || (x === 24 - y);
+                    if (shouldFill) {
+                        ctx.fillRect(x * moduleSize, y * moduleSize, moduleSize, moduleSize);
+                    }
+                }
+            }
+            
+            function drawCorner(x, y) {
+                ctx.fillStyle = 'black';
+                ctx.fillRect(x * moduleSize, y * moduleSize, 7 * moduleSize, 7 * moduleSize);
+                ctx.fillStyle = 'white';
+                ctx.fillRect((x + 1) * moduleSize, (y + 1) * moduleSize, 5 * moduleSize, 5 * moduleSize);
+                ctx.fillStyle = 'black';
+                ctx.fillRect((x + 2) * moduleSize, (y + 2) * moduleSize, 3 * moduleSize, 3 * moduleSize);
+            }
+            
+            drawCorner(0, 0);
+            drawCorner(18, 0);
+            drawCorner(0, 18);
+            
+            ctx.font = 'bold 35px Arial';
+            ctx.fillText('🍕', size/2 - 18, size/2 + 12);
+            
+            canvas.toBlob(blob => {
+                const url = URL.createObjectURL(blob);
+                document.getElementById('download-marker').href = url;
+            });
+        }
+        
+        generateQRMarker();
+        
+        let video, canvas, ctx;
+        let scene, camera, renderer;
+        let pizza, slices = [], selectedSlices = [];
+        let pizzaTargetScale = 0.001;
+        let pizzaTargetPosition = new THREE.Vector3();
+        let detectCanvas, detectCtx;
+        let detectionWidth = 160, detectionHeight = 120;
+        // detection debounce/counters
+        let detectionCounter = 0;
+        const detectionThreshold = 5;       // require 5 consecutive positive frames
+        const detectionLoseThreshold = -4;  // require 4 successive misses to hide
+        let lastDetectedCx = 0, lastDetectedCy = 0, lastDetectedSize = 0;
+        let currentQuestion = {};
+        let markerDetected = false;     
+
+        // marker popup follow state
+        let markerPopup = null;
+        let popupTarget = { x: 0, y: 0 };
+        let popupPos = { x: 0, y: 0 };
+        
+        // Rotation control
+        let pizzaRotationX = -Math.PI / 6;
+        let pizzaRotationY = 0;
+        let pizzaRotationZ = 0;
+        let targetRotationX = -Math.PI / 6;
+        let targetRotationY = 0;
+        
+        // Touch/Mouse control
+        let isDragging = false;
+        let previousTouch = { x: 0, y: 0 };
+        
+        const questions = [
+            { text: "Pilih 1/3 dari pizza\n(2 potong)", answer: 2 },
+            { text: "Pilih 1/2 dari pizza\n(3 potong)", answer: 3 },
+            { text: "Pilih 2/3 dari pizza\n(4 potong)", answer: 4 },
+            { text: "Pilih 1/6 dari pizza\n(1 potong)", answer: 1 },
+            { text: "Pilih 50% dari pizza\n(3 potong)", answer: 3 },
+            { text: "Pilih 5/6 dari pizza\n(5 potong)", answer: 5 }
+        ];
+        
+        document.getElementById('start-ar-btn').addEventListener('click', startAR);
+        
+        async function startAR() {
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('video-container').style.display = 'block';
+            document.getElementById('ar-canvas').style.display = 'block';
+            document.getElementById('ui-overlay').style.display = 'block';
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment', width: 1280, height: 720 },
+                    audio: false 
+                });
+                
+                video = document.getElementById('camera-video');
+                video.srcObject = stream;
+                
+                canvas = document.getElementById('ar-canvas');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+
+                // setup small offscreen canvas for simple marker detection
+                detectCanvas = document.createElement('canvas');
+                detectCanvas.width = detectionWidth;
+                detectCanvas.height = detectionHeight;
+                detectCanvas.style.display = 'none';
+                detectCtx = detectCanvas.getContext('2d');
+                document.body.appendChild(detectCanvas);
+                
+                initThreeJS();
+                setupControls();
+                loadNewQuestion();
+
+                // start with controls disabled until marker is detected
+                const rotationControlsEl = document.getElementById('rotation-controls');
+                const controlsEl = document.getElementById('controls');
+                rotationControlsEl.classList.add('disabled');
+                controlsEl.setAttribute('aria-disabled', 'true');
+                
+                // Reset detection state
+                markerDetected = false;
+                detectionCounter = 0;
+
+                detectMarker();
+
+                // initialize marker popup element
+                markerPopup = document.getElementById('marker-popup');
+                if (markerPopup) {
+                    markerPopup.style.display = 'none';
+                    markerPopup.style.opacity = '0';
+                    // ensure initial position centered
+                    popupPos.x = window.innerWidth / 2;
+                    popupPos.y = window.innerHeight / 2;
+                }
+                
+            } catch (err) {
+                alert('Tidak dapat mengakses kamera: ' + err.message);
+            }
+        }
+        
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            
+            camera = new THREE.PerspectiveCamera(
+                75, 
+                canvas.width / canvas.height, 
+                0.1, 
+                1000
+            );
+            camera.position.z = 4;
+            
+            renderer = new THREE.WebGLRenderer({ 
+                canvas: canvas,
+                alpha: true,
+                antialias: true
+            });
+            renderer.setSize(canvas.width, canvas.height);
+            renderer.setClearColor(0x000000, 0);
+            
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+            directionalLight1.position.set(3, 5, 3);
+            scene.add(directionalLight1);
+            
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+            directionalLight2.position.set(-3, 2, -3);
+            scene.add(directionalLight2);
+            
+            createPizza();
+        }
+        
+        function createPizza() {
+            const pizzaGroup = new THREE.Group();
+            const sliceCount = 6;
+            const radius = 1.5;
+            const thickness = 0.2;
+            
+            for (let i = 0; i < sliceCount; i++) {
+                const slice = createSlice(i, sliceCount, radius, thickness);
+                slices.push(slice);
+                pizzaGroup.add(slice);
+            }
+            
+            scene.add(pizzaGroup);
+            pizza = pizzaGroup;
+            pizza.rotation.x = pizzaRotationX;
+            // start hidden and scaled down until marker is detected
+            pizza.scale.set(0.001, 0.001, 0.001);
+            pizza.visible = false;
+            pizzaTargetScale = 0.001;
+            // Reset position to center initially
+            pizza.position.set(0, 0, 0);
+        }
+        
+        function createSlice(index, total, radius, thickness) {
+            const angle = (Math.PI * 2) / total;
+            const startAngle = angle * index;
+            
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 0);
+            
+            for (let a = 0; a <= angle; a += 0.1) {
+                const x = Math.cos(startAngle + a) * radius;
+                const y = Math.sin(startAngle + a) * radius;
+                shape.lineTo(x, y);
+            }
+            shape.lineTo(0, 0);
+            
+            const extrudeSettings = {
+                depth: thickness,
+                bevelEnabled: true,
+                bevelThickness: 0.02,
+                bevelSize: 0.02
+            };
+            
+            const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            
+            const colors = [0xFFAA33, 0xFF9520, 0xFFB347, 0xFFA500, 0xFF8C00, 0xFFB366];
+            const material = new THREE.MeshPhongMaterial({ 
+                color: colors[index],
+                shininess: 50,
+                side: THREE.DoubleSide
+            });
+            
+            const slice = new THREE.Mesh(geometry, material);
+            slice.rotation.x = -Math.PI / 2;
+            slice.userData = { 
+                index: index, 
+                selected: false,
+                originalY: 0,
+                targetY: 0
+            };
+            
+            const toppingGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+            const toppingMaterial = new THREE.MeshPhongMaterial({ color: 0x8B0000 });
+            
+            for (let j = 0; j < 3; j++) {
+                const topping = new THREE.Mesh(toppingGeometry, toppingMaterial);
+                const r = radius * 0.35 + Math.random() * radius * 0.35;
+                const a = startAngle + angle * (0.2 + Math.random() * 0.6);
+                topping.position.set(
+                    Math.cos(a) * r,
+                    thickness + 0.05,
+                    Math.sin(a) * r
+                );
+                slice.add(topping);
+            }
+            
+            return slice;
+        }
+        
+        function setupControls() {
+            // Arrow buttons - use pointer events for responsiveness
+            document.querySelectorAll('.rotate-btn').forEach(btn => {
+                const handler = (e) => {
+                    e.preventDefault();
+                    const dir = e.currentTarget.dataset.dir;
+                    rotatePizza(dir);
+                };
+                btn.addEventListener('click', handler);
+                btn.addEventListener('pointerdown', handler);
+                btn.addEventListener('touchstart', handler, { passive: false });
+            });
+            
+            // Pointer/touch/mouse drag
+            canvas.addEventListener('pointerdown', startDrag);
+            canvas.addEventListener('pointermove', drag);
+            canvas.addEventListener('pointerup', endDrag);
+            canvas.addEventListener('pointercancel', endDrag);
+            canvas.addEventListener('touchstart', startDrag, { passive: false });
+            canvas.addEventListener('touchmove', drag, { passive: false });
+            canvas.addEventListener('touchend', endDrag);
+            canvas.addEventListener('mousedown', startDrag);
+            canvas.addEventListener('mousemove', drag);
+            canvas.addEventListener('mouseup', endDrag);
+            canvas.addEventListener('click', onCanvasClick);
+        }
+        
+        function rotatePizza(direction) {
+            const rotateAmount = Math.PI / 6;
+            
+            switch(direction) {
+                case 'up':
+                    targetRotationX += rotateAmount;
+                    break;
+                case 'down':
+                    targetRotationX -= rotateAmount;
+                    break;
+                case 'left':
+                    targetRotationY -= rotateAmount;
+                    break;
+                case 'right':
+                    targetRotationY += rotateAmount;
+                    break;
+            }
+        }
+        
+        function startDrag(e) {
+            if (!markerDetected) return;
+            isDragging = true;
+            const touch = e.touches ? e.touches[0] : e;
+            previousTouch = { x: touch.clientX, y: touch.clientY };
+            e.preventDefault();
+        }
+        
+        function drag(e) {
+            if (!markerDetected || !isDragging) return;
+            
+            const touch = e.touches ? e.touches[0] : e;
+            const deltaX = touch.clientX - previousTouch.x;
+            const deltaY = touch.clientY - previousTouch.y;
+            
+            targetRotationY += deltaX * 0.01;
+            targetRotationX += deltaY * 0.01;
+            
+            previousTouch = { x: touch.clientX, y: touch.clientY };
+            e.preventDefault();
+        }
+        
+        function endDrag(e) {
+            isDragging = false;
+        }
+        
+        function detectMarker() {
+            const status = document.getElementById('ar-status');
+            const canvasEl = document.getElementById('ar-canvas');
+            const rotationControls = document.getElementById('rotation-controls');
+            const controlsBar = document.getElementById('controls');
+
+            setInterval(() => {
+                if (!video || video.readyState < 2) return;
+
+                // draw a small version of the video to analyze
+                detectCtx.drawImage(video, 0, 0, detectionWidth, detectionHeight);
+                const img = detectCtx.getImageData(0, 0, detectionWidth, detectionHeight);
+
+                // find dark pixels bounding box
+                let minX = detectionWidth, minY = detectionHeight, maxX = 0, maxY = 0;
+                let darkCount = 0;
+                for (let y = 0; y < detectionHeight; y++) {
+                    for (let x = 0; x < detectionWidth; x++) {
+                        const idx = (y * detectionWidth + x) * 4;
+                        const r = img.data[idx], g = img.data[idx + 1], b = img.data[idx + 2];
+                        const l = (r + g + b) / 3;
+                        if (l < 100) { // treat as dark (more strict threshold)
+                            darkCount++;
+                            if (x < minX) minX = x;
+                            if (y < minY) minY = y;
+                            if (x > maxX) maxX = x;
+                            if (y > maxY) maxY = y;
+                        }
+                    }
+                }
+
+                const w = Math.max(0, maxX - minX + 1);
+                const h = Math.max(0, maxY - minY + 1);
+                const area = w * h;
+                const density = area > 0 ? darkCount / area : 0;
+
+                // More strict detection criteria
+                const found = area > 400 && density > 0.15 && density < 0.7 && 
+                             (w / h > 0.5 && w / h < 2.0) &&
+                             w > 20 && h > 20;
+
+                if (found) {
+                    // update last detected box and increment debounce counter
+                    lastDetectedCx = (minX + maxX) / 2;
+                    lastDetectedCy = (minY + maxY) / 2;
+                    lastDetectedSize = Math.max(w, h);
+                    detectionCounter = Math.min(detectionCounter + 1, detectionThreshold);
+                } else {
+                    detectionCounter = Math.max(detectionCounter - 1, detectionLoseThreshold);
+                }
+
+                // become detected only after enough consecutive positive frames
+                if (detectionCounter >= detectionThreshold && !markerDetected) {
+                    markerDetected = true;
+
+                    // compute screen coordinates (detectCanvas -> ar canvas)
+                    const screenX = (lastDetectedCx / detectionWidth) * canvas.width;
+                    const screenY = (lastDetectedCy / detectionHeight) * canvas.height;
+
+                    // clamp to viewport with small margin
+                    const margin = 60;
+                    popupTarget.x = Math.min(Math.max(screenX, margin), canvas.width - margin);
+                    popupTarget.y = Math.min(Math.max(screenY, margin), canvas.height - margin);
+
+                    // map screen coords to world using current canvas size
+                    const ndcX = (popupTarget.x / canvas.width) * 2 - 1;
+                    const ndcY = -((popupTarget.y / canvas.height) * 2 - 1);
+                    const vec = new THREE.Vector3(ndcX, ndcY, 0.45).unproject(camera);
+                    pizzaTargetPosition.copy(vec);
+
+                    // scale pizza based on detected box size (bigger box => larger pizza)
+                    const sizeFactor = lastDetectedSize / detectionWidth;
+                    pizzaTargetScale = THREE.MathUtils.clamp(sizeFactor * 1.6, 0.5, 2.2);
+
+                    status.textContent = '✅ Marker terdeteksi!';
+                    status.style.background = 'rgba(16, 185, 129, 0.9)';
+
+                    canvasEl.classList.add('visible');
+                    rotationControls.classList.remove('disabled');
+                    rotationControls.removeAttribute('aria-hidden');
+                    controlsBar.removeAttribute('aria-disabled');
+
+                    if (pizza) {
+                        pizza.visible = true;
+                        // start from very small scale for nicer pop-in
+                        pizza.scale.set(0.001, 0.001, 0.001);
+                    }
+
+                    // show and update marker popup content
+                    if (markerPopup) {
+                        markerPopup.querySelector('.title').textContent = currentQuestion.text.split('\n')[0] || 'Objek';
+                        markerPopup.querySelector('.subtitle').textContent = currentQuestion.text.split('\n')[1] || '';
+                        markerPopup.style.display = 'block';
+                        markerPopup.style.left = `${popupTarget.x}px`;
+                        markerPopup.style.top = `${popupTarget.y}px`;
+                        markerPopup.style.opacity = '1';
+                        popupPos.x = popupTarget.x; popupPos.y = popupTarget.y;
+                        markerPopup.style.transform = 'translate(-50%, -140%) scale(0.98)';
+                    }
+                }
+
+                // lose detection only after consecutive misses
+                if (detectionCounter <= detectionLoseThreshold && markerDetected) {
+                    markerDetected = false;
+
+                    status.textContent = '🔍 Cari marker QR...';
+                    status.style.background = 'rgba(0, 0, 0, 0.7)';
+
+                    canvasEl.classList.remove('visible');
+                    rotationControls.classList.add('disabled');
+                    rotationControls.setAttribute('aria-hidden', 'true');
+                    controlsBar.setAttribute('aria-disabled', 'true');
+
+                    pizzaTargetScale = 0.001;
+                    resetSlices();
+                    
+                    // Reset pizza position and hide immediately
+                    if (pizza) {
+                        pizza.position.set(0, 0, 0);
+                        pizza.visible = false;
+                        pizza.scale.set(0.001, 0.001, 0.001);
+                    }
+
+                    if (markerPopup) {
+                        markerPopup.style.opacity = '0';
+                        markerPopup.style.transform = 'translate(-50%, -140%) scale(0.98)';
+                        setTimeout(() => markerPopup.style.display = 'none', 180);
+                    }
+                }
+            }, 200);
+
+            animate();
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Only animate pizza if marker is detected
+            if (markerDetected && pizza) {
+                // smoothly interpolate scale for show/hide animation
+                const newScale = pizza.scale.x + (pizzaTargetScale - pizza.scale.x) * 0.12;
+                pizza.scale.set(newScale, newScale, newScale);
+
+                // smoothly interpolate position to follow marker
+                pizza.position.lerp(pizzaTargetPosition, 0.12);
+
+                // Smooth rotation interpolation
+                pizzaRotationX += (targetRotationX - pizzaRotationX) * 0.1;
+                pizzaRotationY += (targetRotationY - pizzaRotationY) * 0.1;
+
+                pizza.rotation.x = pizzaRotationX;
+                pizza.rotation.y = pizzaRotationY;
+                pizza.rotation.z = pizzaRotationZ;
+
+                // Auto spin when not dragging
+                if (!isDragging) {
+                    pizzaRotationZ += 0.005;
+                }
+
+                // Animate slice lifting
+                slices.forEach(slice => {
+                    const diff = slice.userData.targetY - slice.position.y;
+                    slice.position.y += diff * 0.15;
+                });
+
+                // update marker popup screen position smoothly
+                if (markerPopup && markerDetected) {
+                    popupPos.x += (popupTarget.x - popupPos.x) * 0.12;
+                    popupPos.y += (popupTarget.y - popupPos.y) * 0.12;
+                    markerPopup.style.left = `${popupPos.x}px`;
+                    markerPopup.style.top = `${popupPos.y}px`;
+
+                    // subtle scale effect based on pizza scale
+                    const scale = 0.98 + (pizza.scale.x * 0.02);
+                    markerPopup.style.transform = `translate(-50%, -140%) scale(${scale})`;
+                    markerPopup.style.opacity = '1';
+                }
+
+                renderer.render(scene, camera);
+            } else if (renderer) {
+                // Clear canvas when marker not detected
+                renderer.clear();
+            }
+        }
+        
+        function onCanvasClick(event) {
+            // ignore clicks when marker not detected or canvas is hidden
+            const canvasEl = document.getElementById('ar-canvas');
+            if (!markerDetected || isDragging || !canvasEl.classList.contains('visible')) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+                ((event.clientX - rect.left) / rect.width) * 2 - 1,
+                -((event.clientY - rect.top) / rect.height) * 2 + 1
+            );
+
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObjects(slices, true);
+
+            if (intersects.length > 0) {
+                let slice = intersects[0].object;
+                while (slice.parent && slice.userData.index === undefined) {
+                    slice = slice.parent;
+                }
+                if (slice.userData.index !== undefined) {
+                    toggleSlice(slice);
+                }
+            }
+        }
+        
+        function toggleSlice(slice) {
+            slice.userData.selected = !slice.userData.selected;
+            
+            if (slice.userData.selected) {
+                slice.userData.targetY = 0.6;
+                slice.material.emissive = new THREE.Color(0x666666);
+                if (!selectedSlices.includes(slice)) {
+                    selectedSlices.push(slice);
+                }
+            } else {
+                slice.userData.targetY = 0;
+                slice.material.emissive = new THREE.Color(0x000000);
+                selectedSlices = selectedSlices.filter(s => s !== slice);
+            }
+            
+            updateFractionDisplay();
+        }
+        
+        function updateFractionDisplay() {
+            const display = document.getElementById('fraction-value');
+            display.textContent = `${selectedSlices.length}/6`;
+            display.style.transform = 'scale(1.2)';
+            setTimeout(() => display.style.transform = 'scale(1)', 200);
+        }
+        
+        function loadNewQuestion() {
+            currentQuestion = questions[Math.floor(Math.random() * questions.length)];
+            document.getElementById('question-text').textContent = currentQuestion.text;
+            resetSlices();
+
+            // if popup visible and marker detected, update popup text immediately
+            if (markerPopup && markerDetected) {
+                markerPopup.querySelector('.title').textContent = currentQuestion.text.split('\n')[0] || 'Objek';
+                markerPopup.querySelector('.subtitle').textContent = currentQuestion.text.split('\n')[1] || '';
+            }
+        }
+        
+        function resetSlices() {
+            selectedSlices = [];
+            slices.forEach(slice => {
+                slice.userData.selected = false;
+                slice.userData.targetY = 0;
+                slice.material.emissive = new THREE.Color(0x000000);
+            });
+            updateFractionDisplay();
+        }
+        
+        function checkAnswer() {
+            if (!markerDetected) {
+                alert('Arahkan kamera ke marker!');
+                return;
+            }
+            
+            const resultMessage = document.getElementById('result-message');
+            
+            if (selectedSlices.length === currentQuestion.answer) {
+                resultMessage.textContent = '🎉 BENAR!\nHebat Sekali!';
+                resultMessage.className = 'correct show';
+                
+                let spinCount = 0;
+                const spinInterval = setInterval(() => {
+                    targetRotationY += 0.3;
+                    spinCount++;
+                    if (spinCount > 15) clearInterval(spinInterval);
+                }, 50);
+                
+            } else {
+                resultMessage.textContent = `❌ Belum Tepat!\nJawabannya: ${currentQuestion.answer} potong`;
+                resultMessage.className = 'incorrect show';
+            }
+            
+            setTimeout(() => {
+                resultMessage.classList.remove('show');
+            }, 3000);
+        }
+        
+        document.getElementById('new-question-btn').addEventListener('click', loadNewQuestion);
+        document.getElementById('check-btn').addEventListener('click', checkAnswer);
+        document.getElementById('reset-btn').addEventListener('click', resetSlices);
+        
+        window.addEventListener('resize', () => {
+            if (canvas && camera && renderer) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                camera.aspect = canvas.width / canvas.height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(canvas.width, canvas.height);
+            }
+        });
+    </script>
+</body>
+</html>
