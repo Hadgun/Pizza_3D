@@ -605,6 +605,8 @@
 
         // hovered slice visual feedback for quick tap targetting
         let hoveredSlice = null;
+        // persistent candidate when touch starts on a slice (helps when finger drifts off canvas before touchend)
+        let touchCandidateSlice = null;
         
         // ensure a sensible max pizza scale on small screens
         function getMaxPizzaScale() {
@@ -839,6 +841,9 @@
             window.addEventListener('touchend', endDrag);
             window.addEventListener('touchcancel', endDrag);
             window.addEventListener('pointerup', endDrag);
+            // ensure cancels also clear candidate state
+            window.addEventListener('touchcancel', () => { touchCandidateSlice = null; clearHoveredSlice(); });
+            window.addEventListener('pointercancel', () => { touchCandidateSlice = null; clearHoveredSlice(); });
 
             // Fast hover feedback for mouse and pointer move (immediate visual target)
             const pointerHover = (e) => {
@@ -901,7 +906,13 @@
 
             // provide immediate hover feedback for quick taps
             const immediate = performRaycast(touch.clientX, touch.clientY);
-            if (immediate) setHoveredSlice(immediate);
+            if (immediate) {
+                setHoveredSlice(immediate);
+                // keep as a persistent candidate in case the finger drifts off the canvas before touchend
+                touchCandidateSlice = immediate;
+            } else {
+                touchCandidateSlice = null;
+            }
 
             e.preventDefault();
         }
@@ -919,6 +930,8 @@
                 isDragging = true;
                 // when drag begins, clear hover to avoid confusion
                 clearHoveredSlice();
+                // clear candidate since this is now a drag
+                touchCandidateSlice = null;
             }
 
             // while not dragging, update hover (quick finger reposition)
@@ -957,8 +970,9 @@
             if (!isDragging && duration < TAP_MAX_DURATION && dist < TAP_MAX_MOVE) {
                 // try multi-point raycast for reliable hits (center-first)
                 let slice = performRaycastMulti(touch.clientX, touch.clientY);
-                // fallback to checking the start position (in case finger drifted) or using a wider radius
-                if (!slice) slice = performRaycastMulti(touchStartPos.x, touchStartPos.y, 64, 20) || performRaycast(touchStartPos.x, touchStartPos.y) || hoveredSlice;
+                // fallback to checking the start position (in case finger drifted), using a wider radius,
+                // or the candidate slice we captured on touchstart
+                if (!slice) slice = performRaycastMulti(touchStartPos.x, touchStartPos.y, 64, 20) || performRaycast(touchStartPos.x, touchStartPos.y) || touchCandidateSlice || hoveredSlice;
 
                 if (slice) {
                     if (navigator.vibrate) navigator.vibrate(24);
@@ -971,6 +985,8 @@
                         setTimeout(() => clearHoveredSlice(), 120);
                     }, 30);
                 }
+                // clear persistent candidate after processing
+                touchCandidateSlice = null;
             }
 
             isPointerDown = false;
@@ -1239,7 +1255,8 @@
 
         function handleTap(clientX, clientY) {
             // use multi-point raycast on mobile for better hit chances
-            const slice = performRaycastMulti(clientX, clientY);
+            let slice = performRaycastMulti(clientX, clientY);
+            if (!slice) slice = touchCandidateSlice || hoveredSlice;
             if (slice) {
                 // small vibration for feedback (if supported)
                 if (navigator.vibrate) navigator.vibrate(20);
@@ -1250,6 +1267,8 @@
                     toggleSlice(slice);
                     setTimeout(() => clearHoveredSlice(), 120);
                 }, 30);
+                // clear persistent candidate
+                touchCandidateSlice = null;
                 return true;
             }
             return false;
