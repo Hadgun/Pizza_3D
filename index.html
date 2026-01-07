@@ -599,8 +599,8 @@
         let isPointerDown = false;            // pointer/touch currently down
         let touchStartTime = 0;               // timestamp of touch/pointer start
         let touchStartPos = { x: 0, y: 0 };   // starting position of touch
-        const TAP_MAX_DURATION = 220;         // max ms to treat as tap (shorter => quicker taps)
-        const TAP_MAX_MOVE = 12;              // max px move to treat as tap
+        const TAP_MAX_DURATION = 260;         // max ms to treat as tap (slightly more forgiving)
+        const TAP_MAX_MOVE = 18;              // max px move to treat as tap (allow tiny finger shifts)
 
         // hovered slice visual feedback for quick tap targetting
         let hoveredSlice = null;
@@ -948,9 +948,11 @@
 
             // if it looks like a tap, handle as tap (select slice)
             if (!isDragging && duration < TAP_MAX_DURATION && dist < TAP_MAX_MOVE) {
-                // provide immediate visual feedback before toggling
-                const slice = performRaycast(touch.clientX, touch.clientY);
+                // try multi-point raycast for reliable hits
+                const slice = performRaycastMulti(touch.clientX, touch.clientY);
                 if (slice) {
+                    if (navigator.vibrate) navigator.vibrate(20);
+
                     // quick pulse to indicate tap recognized
                     setHoveredSlice(slice);
                     setTimeout(() => {
@@ -1165,7 +1167,7 @@
             const canvasEl = document.getElementById('ar-canvas');
             if (!markerDetected || !canvasEl.classList.contains('visible')) return null;
 
-            const rect = canvas.getBoundingClientRect();
+            const rect = canvasEl.getBoundingClientRect();
             const mouse = new THREE.Vector2(
                 ((clientX - rect.left) / rect.width) * 2 - 1,
                 -((clientY - rect.top) / rect.height) * 2 + 1
@@ -1181,6 +1183,24 @@
                     slice = slice.parent;
                 }
                 return slice.userData.index !== undefined ? slice : null;
+            }
+            return null;
+        }
+
+        // Try multiple nearby points (spiral) when a direct raycast fails. Helps on mobile when users tap slightly off the visible pizza.
+        function performRaycastMulti(clientX, clientY, radius = 28, steps = 10) {
+            // try center first
+            const centerHit = performRaycast(clientX, clientY);
+            if (centerHit) return centerHit;
+
+            // spiral sampling
+            for (let i = 1; i <= steps; i++) {
+                const angle = (i / steps) * Math.PI * 2;
+                const r = (i / steps) * radius;
+                const sx = clientX + Math.cos(angle) * r;
+                const sy = clientY + Math.sin(angle) * r;
+                const hit = performRaycast(sx, sy);
+                if (hit) return hit;
             }
             return null;
         }
@@ -1208,8 +1228,21 @@
         }
 
         function handleTap(clientX, clientY) {
-            const slice = performRaycast(clientX, clientY);
-            if (slice) toggleSlice(slice);
+            // use multi-point raycast on mobile for better hit chances
+            const slice = performRaycastMulti(clientX, clientY);
+            if (slice) {
+                // small vibration for feedback (if supported)
+                if (navigator.vibrate) navigator.vibrate(20);
+
+                // show a quick hover pulse then toggle
+                setHoveredSlice(slice);
+                setTimeout(() => {
+                    toggleSlice(slice);
+                    setTimeout(() => clearHoveredSlice(), 120);
+                }, 30);
+                return true;
+            }
+            return false;
         }
 
         function onCanvasClick(event) {
