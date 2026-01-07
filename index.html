@@ -594,6 +594,25 @@
         let markerPopup = null;
         let popupTarget = { x: 0, y: 0 };
         let popupPos = { x: 0, y: 0 };
+
+        // touch / tap helper state (for mobile tap detection)
+        let isPointerDown = false;            // pointer/touch currently down
+        let touchStartTime = 0;               // timestamp of touch/pointer start
+        let touchStartPos = { x: 0, y: 0 };   // starting position of touch
+        const TAP_MAX_DURATION = 220;         // max ms to treat as tap (shorter => quicker taps)
+        const TAP_MAX_MOVE = 12;              // max px move to treat as tap
+
+        // hovered slice visual feedback for quick tap targetting
+        let hoveredSlice = null;
+        
+        // ensure a sensible max pizza scale on small screens
+        function getMaxPizzaScale() {
+            // more conservative caps so pizza doesn't fill the screen
+            if (window.innerWidth <= 360) return 0.75;        // very small phones
+            if (window.innerWidth <= 420) return 0.85;        // small phones
+            if (window.innerWidth <= 800) return 0.95;        // tablets / small laptops
+            return 1.2;                                      // larger screens
+        }
         
         // Rotation control
         let pizzaRotationX = -Math.PI / 6;
@@ -813,6 +832,31 @@
             canvas.addEventListener('mousemove', drag);
             canvas.addEventListener('mouseup', endDrag);
             canvas.addEventListener('click', onCanvasClick);
+
+            // Fast hover feedback for mouse and pointer move (immediate visual target)
+            const pointerHover = (e) => {
+                if (!markerDetected) return;
+                const clientX = e.clientX || (e.touches && e.touches[0] && e.touches[0].clientX);
+                const clientY = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY);
+                if (clientX == null || clientY == null) return;
+
+                // only show hover when not actively dragging (so drag remains smooth)
+                if (isDragging) {
+                    clearHoveredSlice();
+                    return;
+                }
+
+                const slice = performRaycast(clientX, clientY);
+                if (slice && slice !== hoveredSlice) {
+                    setHoveredSlice(slice);
+                } else if (!slice) {
+                    clearHoveredSlice();
+                }
+            };
+
+            canvas.addEventListener('pointermove', pointerHover);
+            canvas.addEventListener('mousemove', pointerHover);
+            canvas.addEventListener('touchmove', pointerHover, { passive: false });
         }
         
         function rotatePizza(direction) {
@@ -836,28 +880,91 @@
         
         function startDrag(e) {
             if (!markerDetected) return;
-            isDragging = true;
+            isPointerDown = true;
+            isDragging = false; // only set true once movement threshold passed
             const touch = e.touches ? e.touches[0] : e;
             previousTouch = { x: touch.clientX, y: touch.clientY };
+            touchStartPos = { x: touch.clientX, y: touch.clientY };
+            touchStartTime = performance.now();
+
+            // try to capture pointer for consistent pointer events
+            if (e.pointerId && e.target && e.target.setPointerCapture) {
+                try { e.target.setPointerCapture(e.pointerId); } catch (err) {}
+            }
+
+            // provide immediate hover feedback for quick taps
+            const immediate = performRaycast(touch.clientX, touch.clientY);
+            if (immediate) setHoveredSlice(immediate);
+
             e.preventDefault();
         }
         
         function drag(e) {
-            if (!markerDetected || !isDragging) return;
-            
+            if (!markerDetected || !isPointerDown) return;
+
             const touch = e.touches ? e.touches[0] : e;
+            const moveX = touch.clientX - touchStartPos.x;
+            const moveY = touch.clientY - touchStartPos.y;
+            const dist = Math.hypot(moveX, moveY);
+
+            // if movement exceeds threshold, begin dragging
+            if (!isDragging && dist > TAP_MAX_MOVE) {
+                isDragging = true;
+                // when drag begins, clear hover to avoid confusion
+                clearHoveredSlice();
+            }
+
+            // while not dragging, update hover (quick finger reposition)
+            if (!isDragging) {
+                const slice = performRaycast(touch.clientX, touch.clientY);
+                if (slice && slice !== hoveredSlice) setHoveredSlice(slice);
+                return;
+            }
+
             const deltaX = touch.clientX - previousTouch.x;
             const deltaY = touch.clientY - previousTouch.y;
-            
+
             targetRotationY += deltaX * 0.01;
             targetRotationX += deltaY * 0.01;
-            
+
             previousTouch = { x: touch.clientX, y: touch.clientY };
             e.preventDefault();
         }
         
         function endDrag(e) {
+            // if pointer not from a marker-interaction, reset
+            if (!markerDetected) {
+                isPointerDown = false;
+                isDragging = false;
+                clearHoveredSlice();
+                return;
+            }
+
+            const touch = (e.changedTouches && e.changedTouches[0]) || e;
+            const duration = performance.now() - (touchStartTime || performance.now());
+            const moveX = touch.clientX - touchStartPos.x;
+            const moveY = touch.clientY - touchStartPos.y;
+            const dist = Math.hypot(moveX, moveY);
+
+            // if it looks like a tap, handle as tap (select slice)
+            if (!isDragging && duration < TAP_MAX_DURATION && dist < TAP_MAX_MOVE) {
+                // provide immediate visual feedback before toggling
+                const slice = performRaycast(touch.clientX, touch.clientY);
+                if (slice) {
+                    // quick pulse to indicate tap recognized
+                    setHoveredSlice(slice);
+                    setTimeout(() => {
+                        toggleSlice(slice);
+                        // small delay to keep hover visible briefly
+                        setTimeout(() => clearHoveredSlice(), 120);
+                    }, 30);
+                }
+            }
+
+            isPointerDown = false;
             isDragging = false;
+            // if user ends interaction, reset hover if no selection
+            if (!hoveredSlice) clearHoveredSlice();
         }
         
         function detectMarker() {
@@ -927,12 +1034,21 @@
                     // map screen coords to world using current canvas size
                     const ndcX = (popupTarget.x / canvas.width) * 2 - 1;
                     const ndcY = -((popupTarget.y / canvas.height) * 2 - 1);
-                    const vec = new THREE.Vector3(ndcX, ndcY, 0.45).unproject(camera);
+
+                    // compute sizeFactor from detection (0..1)
+                    const sizeFactor = Math.min(1, lastDetectedSize / detectionWidth);
+
+                    // choose an NDC depth that moves the pizza farther away when detection is large
+                    // (larger detection -> larger sizeFactor -> increase ndcZ to push object away)
+                    const ndcZ = THREE.MathUtils.clamp(0.45 + (sizeFactor - 0.45) * 0.8, 0.35, 0.9);
+
+                    const vec = new THREE.Vector3(ndcX, ndcY, ndcZ).unproject(camera);
                     pizzaTargetPosition.copy(vec);
 
-                    // scale pizza based on detected box size (bigger box => larger pizza)
-                    const sizeFactor = lastDetectedSize / detectionWidth;
-                    pizzaTargetScale = THREE.MathUtils.clamp(sizeFactor * 1.6, 0.5, 2.2);
+                    // scale pizza based on detected box size (bigger box => slightly larger pizza,
+                    // but cap more strictly to avoid filling the screen)
+                    const maxScale = getMaxPizzaScale();
+                    pizzaTargetScale = THREE.MathUtils.clamp(sizeFactor * 0.8, 0.35, Math.min(maxScale, 1.05));
 
                     status.textContent = '✅ Marker terdeteksi!';
                     status.style.background = 'rgba(16, 185, 129, 0.9)';
@@ -1045,31 +1161,61 @@
             }
         }
         
-        function onCanvasClick(event) {
-            // ignore clicks when marker not detected or canvas is hidden
+        function performRaycast(clientX, clientY) {
             const canvasEl = document.getElementById('ar-canvas');
-            if (!markerDetected || isDragging || !canvasEl.classList.contains('visible')) return;
+            if (!markerDetected || !canvasEl.classList.contains('visible')) return null;
 
             const rect = canvas.getBoundingClientRect();
             const mouse = new THREE.Vector2(
-                ((event.clientX - rect.left) / rect.width) * 2 - 1,
-                -((event.clientY - rect.top) / rect.height) * 2 + 1
+                ((clientX - rect.left) / rect.width) * 2 - 1,
+                -((clientY - rect.top) / rect.height) * 2 + 1
             );
 
             const raycaster = new THREE.Raycaster();
             raycaster.setFromCamera(mouse, camera);
 
             const intersects = raycaster.intersectObjects(slices, true);
-
             if (intersects.length > 0) {
                 let slice = intersects[0].object;
                 while (slice.parent && slice.userData.index === undefined) {
                     slice = slice.parent;
                 }
-                if (slice.userData.index !== undefined) {
-                    toggleSlice(slice);
-                }
+                return slice.userData.index !== undefined ? slice : null;
             }
+            return null;
+        }
+
+        // Hover helpers: quick visual feedback for mobile + desktop
+        function setHoveredSlice(slice) {
+            if (!slice) return;
+            if (hoveredSlice === slice) return;
+            clearHoveredSlice();
+            hoveredSlice = slice;
+            // don't override 'selected' emissive
+            if (!slice.userData.selected) {
+                slice.material.emissive = new THREE.Color(0x333333);
+                slice.material.emissiveIntensity = 0.8;
+            }
+        }
+
+        function clearHoveredSlice() {
+            if (!hoveredSlice) return;
+            if (!hoveredSlice.userData.selected) {
+                hoveredSlice.material.emissive = new THREE.Color(0x000000);
+                hoveredSlice.material.emissiveIntensity = 0.0;
+            }
+            hoveredSlice = null;
+        }
+
+        function handleTap(clientX, clientY) {
+            const slice = performRaycast(clientX, clientY);
+            if (slice) toggleSlice(slice);
+        }
+
+        function onCanvasClick(event) {
+            // preserve mouse click behavior (desktop)
+            if (isDragging) return;
+            handleTap(event.clientX, event.clientY);
         }
         
         function toggleSlice(slice) {
